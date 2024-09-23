@@ -31,6 +31,13 @@ namespace tags {
     struct node_size {};
     //! @brief Shape of the current node.
     struct node_shape {};
+    //! @brief Number of neighbours of the current node.
+    struct node_nbr {};
+    //! @brief Maximum number of neighbours of the current node.
+    struct node_max_nbr {};
+    //! @brief Maximum number of neighbours of all nodes.
+    struct node_max_nbr_abs {};
+
     // ... add more as needed, here and in the tuple_store<...> option below
 }
 
@@ -130,32 +137,128 @@ FUN bool recent_dis_monitor(ARGS, bool disrisk) { CODE
 }
 FUN_EXPORT monitor_t = export_list<past_ctl_t, slcs_t>;
 
+
 // @brief Main function.
 MAIN() {
     // import tag names in the local scope.
+
     using namespace tags;
 
-    // sample code below (substitute with the solution to the exercises)...
+    // 1. compute the number of neighbours
+    int num_neighbours = fold_hood(CALL, [&](int a, int b) { return a + b; }, nbr(CALL, 1));
 
-    // usage of aggregate constructs
-    field<double> f = nbr(CALL, 4.2); // nbr with single value
-    int x = old(CALL, 0, [&](int a){  // old with initial value and update function
-        return a+1;
-    });
-    int y = nbr(CALL, 0, [&](field<int> a){ // nbr with initial value and update function
-        return min_hood(CALL, a);
+    // 2. compute the maximum number of neighbours
+    int max_neighbours_local = old(CALL, 0, [&](int prev_max) {
+        return prev_max < num_neighbours ? num_neighbours : prev_max;
     });
 
-    // usage of node physics
-    node.velocity() = -node.position()/communication_range;
+    // 3. compute the maximum number of neighbours of any node
+    int max_neighbours_global = nbr(CALL, max_neighbours_local, [&](field<int> x) {
+        return max(max_hood(CALL, x), max_neighbours_local);
+    });
+
+
+    // 4. move to the node with less neighbours
+    tuple<int, vec<2>> curr_tuple = make_tuple(num_neighbours, node.position());
+    field<tuple<int, vec<2>>> nbr_tuples = nbr(CALL, curr_tuple);
+
+    vec<2> min_nbr_pos = get<1>(min_hood(CALL, nbr_tuples));
+
+    node.velocity() = (min_nbr_pos - node.position()) / 10;
+
+
+    /*
+    // 5. move away from the neighbour with the highest number of neighbours.
+    tuple<int, vec<2>> curr_tuple = make_tuple(num_neighbours, node.position());
+    field<tuple<int, vec<2>>> nbr_tuples = nbr(CALL, curr_tuple);
+
+    vec<2> max_nbr_pos = get<1>(max_hood(CALL, nbr_tuples));
+
+    node.velocity() = (node.position() - max_nbr_pos) / 10;
+    */
+
+    /*
+    // 6. move as if the device was attracted by the neighbour with the lowest number of neighbours,
+    // and repulsed by the neighbour with the highest number of neighbours.
+
+    tuple<int, vec<2>> curr_tuple = make_tuple(num_neighbours, node.position());
+    field<tuple<int, vec<2>>> nbr_tuples = nbr(CALL, curr_tuple);
+
+    vec<2> min_nbr_pos = get<1>(min_hood(CALL, nbr_tuples));
+    vec<2> max_nbr_pos = get<1>(max_hood(CALL, nbr_tuples));
+
+    vec<2> attr = (min_nbr_pos - node.position());
+    vec<2> rep = (node.position() - max_nbr_pos);
+
+    vec<2> n_attr = norm(attr) != 0 ? attr / pow(norm(attr), 3) : vec<2>{0, 0};
+
+    vec<2> n_rep = norm(rep) != 0 ? rep / pow(norm(rep), 3) : vec<2>{0, 0};
+
+    vec<2> tot = n_attr + n_rep;
+
+    node.propulsion() = tot;
+    */
+
+    /*
+    // 6. with velocity instead of propulsion
+
+    tuple<int, vec<2>> curr_tuple = make_tuple(num_neighbours, node.position());
+    field<tuple<int, vec<2>>> nbr_tuples = nbr(CALL, curr_tuple);
+
+    vec<2> min_nbr_pos = get<1>(min_hood(CALL, nbr_tuples));
+    vec<2> max_nbr_pos = get<1>(max_hood(CALL, nbr_tuples));
+
+    vec<2> attr = (min_nbr_pos - node.position());
+    vec<2> rep = (max_nbr_pos - node.position());
+
+    int x_tot = attr[0] - rep[0];
+    int y_tot = attr[1] - rep[1];
+
+    vec<2> tot = make_vec(x_tot, y_tot); 
+
+    node.velocity() = tot / 10;
+    */
+
+    /*
+    // 7. move as if the device was repulsed by every neighbour, and by the four walls of the
+    // rectangular box between points [0,0] and [500,500].
+    
+    vec<2> curr_pos = node.position();
+    vec<2> nbr_force = sum_hood(CALL, map_hood([](vec<2> nbr_dist) {
+        return norm(nbr_dist) != 0 ? nbr_dist / pow(norm(nbr_dist), 3) : make_vec(0,0);
+    }, node.nbr_vec()), vec<2>{});
+
+    vec<2> wall_force = make_vec(0, 0);
+
+    vec<2> down_wall = make_vec(curr_pos[0], 0);
+    vec<2> up_wall = make_vec(curr_pos[0], 500);
+    vec<2> left_wall = make_vec(0, curr_pos[1]);
+    vec<2> right_wall = make_vec(500, curr_pos[1]);
+
+    vec<2> down_arrow = curr_pos - down_wall;
+    vec<2> up_arrow = curr_pos - up_wall;
+    vec<2> left_arrow = curr_pos - left_wall;
+    vec<2> right_arrow = curr_pos - right_wall;
+
+    wall_force += (down_arrow / pow(norm(down_arrow), 3));
+    wall_force += (up_arrow / pow(norm(up_arrow), 3));
+    wall_force += (left_arrow / pow(norm(left_arrow), 3));
+    wall_force += (right_arrow / pow(norm(right_arrow), 3));
+
+    node.propulsion() = nbr_force + wall_force;
+    */
 
     // usage of node storage
     node.storage(node_size{}) = 10;
-    node.storage(node_color{}) = color(GREEN);
+    node.storage(node_color{}) = color(PURPLE);
     node.storage(node_shape{}) = shape::sphere;
+    node.storage(node_nbr{}) = num_neighbours;
+    node.storage(node_max_nbr{}) = max_neighbours_local;
+    node.storage(node_max_nbr_abs{}) = max_neighbours_global;
+
 }
 //! @brief Export types used by the main function (update it when expanding the program).
-FUN_EXPORT main_t = export_list<double, int, monitor_t>;
+FUN_EXPORT main_t = export_list<double, int, fcpp::vec<2> ,fcpp::tuple<int, fcpp::vec<2>>, monitor_t>;
 
 } // namespace coordination
 
@@ -189,7 +292,10 @@ using rectangle_d = distribution::rect_n<1, 0, 0, 500, 500>;
 using store_t = tuple_store<
     node_color,                 color,
     node_size,                  double,
-    node_shape,                 shape
+    node_shape,                 shape,
+    node_nbr,                   int,
+    node_max_nbr,               int,
+    node_max_nbr_abs,           int
 >;
 //! @brief The tags and corresponding aggregators to be logged (change as needed).
 using aggregator_t = aggregators<
